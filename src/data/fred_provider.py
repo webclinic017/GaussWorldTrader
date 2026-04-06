@@ -2,15 +2,20 @@
 Federal Reserve Economic Data (FRED) API provider
 """
 
-import os
-import pandas as pd
-from typing import Dict, List, Any
 import logging
+import os
+from typing import Any, Dict, List
+
+import pandas as pd
 
 try:
     from fredapi import Fred
 except ImportError:
     Fred = None
+
+
+class FREDProviderError(RuntimeError):
+    """Raised when FRED data cannot be loaded."""
 
 
 class FREDProvider:
@@ -27,54 +32,76 @@ class FREDProvider:
             self.logger.error("fredapi library not installed. Install with: pip install fredapi")
             self.client = None
         else:
-            try:
-                self.client = Fred(api_key=self.api_key)
-            except Exception as e:
-                self.logger.error(f"Error initializing FRED client: {e}")
-                self.client = None
+            self.client = Fred(api_key=self.api_key)
+
+    def _require_client(self) -> Fred:
+        if not self.api_key:
+            raise FREDProviderError("FRED API key not provided")
+        if Fred is None:
+            raise FREDProviderError("fredapi library is not installed")
+        if self.client is None:
+            raise FREDProviderError("FRED client is not initialized")
+        return self.client
     
-    def get_series_data(self, series_id: str, 
-                       start_date: str = None, 
-                       end_date: str = None) -> pd.DataFrame:
+    def get_series_data(
+        self,
+        series_id: str,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> pd.DataFrame:
         """Get economic data series from FRED"""
-        if not self.client:
-            return pd.DataFrame({"error": ["API client not configured"]})
-        
+        client = self._require_client()
         try:
-            data = self.client.get_series(
-                series_id, 
-                observation_start=start_date, 
+            data = client.get_series(
+                series_id,
+                observation_start=start_date,
                 observation_end=end_date
             )
-            
-            # Convert to DataFrame with consistent format
-            df = pd.DataFrame({'value': data})
-            df.index.name = 'date'
-            
-            return df
-            
-        except Exception as e:
-            self.logger.error(f"Error fetching FRED series {series_id}: {e}")
-            return pd.DataFrame({"error": [str(e)]})
+        except Exception as exc:
+            raise FREDProviderError(f"Failed to load FRED series {series_id}: {exc}") from exc
+
+        df = pd.DataFrame({'value': data})
+        df.index.name = 'date'
+        return df
     
-    def get_gdp_data(self, start_date: str = None) -> pd.DataFrame:
+    def get_gdp_data(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> pd.DataFrame:
         """Get GDP data"""
-        return self.get_series_data('GDP', start_date)
+        return self.get_series_data('GDP', start_date, end_date)
     
-    def get_unemployment_rate(self, start_date: str = None) -> pd.DataFrame:
+    def get_unemployment_rate(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> pd.DataFrame:
         """Get unemployment rate"""
-        return self.get_series_data('UNRATE', start_date)
+        return self.get_series_data('UNRATE', start_date, end_date)
     
-    def get_inflation_rate(self, start_date: str = None) -> pd.DataFrame:
+    def get_inflation_rate(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> pd.DataFrame:
         """Get CPI inflation rate"""
-        return self.get_series_data('CPIAUCSL', start_date)
+        return self.get_series_data('CPIAUCSL', start_date, end_date)
     
-    def get_federal_funds_rate(self, start_date: str = None) -> pd.DataFrame:
+    def get_federal_funds_rate(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> pd.DataFrame:
         """Get Federal Funds Rate"""
-        return self.get_series_data('FEDFUNDS', start_date)
+        return self.get_series_data('FEDFUNDS', start_date, end_date)
     
-    def get_treasury_yield(self, maturity: str = '10Y', 
-                          start_date: str = None) -> pd.DataFrame:
+    def get_treasury_yield(
+        self,
+        maturity: str = '10Y',
+        start_date: str = None,
+        end_date: str = None,
+    ) -> pd.DataFrame:
         """Get Treasury yield rates"""
         series_mapping = {
             '3M': 'TB3MS',
@@ -87,45 +114,43 @@ class FREDProvider:
         }
         
         series_id = series_mapping.get(maturity, 'GS10')
-        return self.get_series_data(series_id, start_date)
+        return self.get_series_data(series_id, start_date, end_date)
     
-    def get_economic_indicators(self, start_date: str = None) -> Dict[str, pd.DataFrame]:
+    def get_economic_indicators(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> Dict[str, pd.DataFrame]:
         """Get key economic indicators"""
         indicators = {
-            'GDP': self.get_gdp_data(start_date),
-            'Unemployment': self.get_unemployment_rate(start_date),
-            'Inflation': self.get_inflation_rate(start_date),
-            'Federal_Funds_Rate': self.get_federal_funds_rate(start_date),
-            'Treasury_10Y': self.get_treasury_yield('10Y', start_date)
+            'GDP': self.get_gdp_data(start_date, end_date),
+            'Unemployment': self.get_unemployment_rate(start_date, end_date),
+            'Inflation': self.get_inflation_rate(start_date, end_date),
+            'Federal_Funds_Rate': self.get_federal_funds_rate(start_date, end_date),
+            'Treasury_10Y': self.get_treasury_yield('10Y', start_date, end_date)
         }
         
         return indicators
     
     def search_series(self, search_text: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search for economic data series"""
-        if not self.client:
-            return [{"error": "API client not configured"}]
-        
+        client = self._require_client()
         try:
-            # Use fredapi's search functionality
-            search_results = self.client.search(search_text, limit=limit)
-            
-            # Convert to list of dictionaries for consistency
-            result_list = []
-            for idx, row in search_results.iterrows():
-                result_list.append({
-                    'id': row.get('id', ''),
-                    'title': row.get('title', ''),
-                    'observation_start': row.get('observation_start', ''),
-                    'observation_end': row.get('observation_end', ''),
-                    'frequency': row.get('frequency', ''),
-                    'units': row.get('units', ''),
-                    'seasonal_adjustment': row.get('seasonal_adjustment', ''),
-                    'notes': row.get('notes', '')
-                })
-            
-            return result_list
-            
-        except Exception as e:
-            self.logger.error(f"Error searching FRED series: {e}")
-            return [{"error": str(e)}]
+            search_results = client.search(search_text, limit=limit)
+        except Exception as exc:
+            raise FREDProviderError(f"Failed to search FRED series for {search_text}: {exc}") from exc
+
+        result_list = []
+        for idx, row in search_results.iterrows():
+            result_list.append({
+                'id': row.get('id', ''),
+                'title': row.get('title', ''),
+                'observation_start': row.get('observation_start', ''),
+                'observation_end': row.get('observation_end', ''),
+                'frequency': row.get('frequency', ''),
+                'units': row.get('units', ''),
+                'seasonal_adjustment': row.get('seasonal_adjustment', ''),
+                'notes': row.get('notes', '')
+            })
+
+        return result_list

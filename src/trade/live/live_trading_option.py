@@ -7,7 +7,7 @@ from typing import Any, List, Optional
 
 import pytz
 
-from src.agent.watchlist_manager import WatchlistManager
+from src.watchlist import WatchlistManager
 from src.strategy.base import StrategyBase
 from src.strategy.registry import get_strategy_registry
 from src.utils.asset_utils import merge_symbol_sources
@@ -15,7 +15,7 @@ from src.utils.timezone_utils import format_duration
 
 from .live_trading_base import LiveTradingEngine, PositionState
 from .live_runner import run_live_engines
-from .option_engine import TradingOptionEngine
+from src.trade.engine import TradingOptionEngine
 
 
 EASTERN = pytz.timezone("US/Eastern")
@@ -206,14 +206,11 @@ def get_default_option_symbols() -> List[str]:
     manager = WatchlistManager()
     watchlist_symbols = manager.get_watchlist(asset_type="option")
     position_symbols: List[str] = []
-    try:
-        engine = TradingOptionEngine()
-        for pos in engine.get_option_positions():
-            underlying = pos.get("underlying")
-            if underlying:
-                position_symbols.append(underlying)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Failed to load option positions: %s", exc)
+    engine = TradingOptionEngine()
+    for pos in engine.get_option_positions():
+        underlying = pos.get("underlying")
+        if underlying:
+            position_symbols.append(underlying)
     defaults = merge_symbol_sources("option", watchlist_symbols, position_symbols)
     return defaults or ["AAPL"]
 

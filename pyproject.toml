@@ -32,6 +32,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "alpaca-py>=0.25.0",
     "ta-lib>=0.4.28",
+    "vectorbt>=0.26.0",
     "matplotlib>=3.8.0",
     "plotly>=5.17.0",
     "seaborn>=0.13.0",
@@ -85,19 +86,24 @@ trading-dashboard = "dashboard:main"
 
 [tool.setuptools]
 packages = [
-    "config",
     "src",
     "src.account",
     "src.agent",
     "src.analysis",
+    "src.backtest",
     "src.data",
+    "src.llm",
+    "src.notify",
     "src.strategy",
     "src.strategy.crypto",
     "src.strategy.option",
     "src.strategy.stock",
     "src.trade",
+    "src.trade.engine",
+    "src.trade.live",
     "src.ui",
-    "src.utils"
+    "src.utils",
+    "src.watchlist",
 ]
 
 [tool.setuptools.package-data]
@@ -152,7 +158,7 @@ unfixable = ["B"]
 "tests/**/*" = ["ARG", "FBT"]
 
 [tool.ruff.isort]
-known-first-party = ["src", "config"]
+known-first-party = ["src"]
 
 # MyPy configuration (Python 3.12 features)
 [tool.mypy]

@@ -7,8 +7,10 @@ from .base import (
 )
 from .registry import get_strategy_registry, StrategyRegistry
 from .option import WheelStrategy, VerticalSpreadStrategy
-from .crypto import CryptoMomentumStrategy, BTCVolatilityBreakoutStrategy
+from .crypto import BTCVolatilityBreakoutStrategy
 from .stock import (
+    MacroFactorStrategy,
+    MeanReversionStrategy,
     MomentumStrategy,
     ValueStrategy,
     TrendFollowingStrategy,
@@ -24,8 +26,9 @@ __all__ = [
     "BaseOptionStrategy",
     "StrategyRegistry",
     "get_strategy_registry",
-    "CryptoMomentumStrategy",
     "BTCVolatilityBreakoutStrategy",
+    "MeanReversionStrategy",
+    "MacroFactorStrategy",
     "MomentumStrategy",
     "ValueStrategy",
     "TrendFollowingStrategy",

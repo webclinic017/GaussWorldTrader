@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from alpaca.trading.requests import OptionLegRequest
 from alpaca.trading.enums import OrderSide
 
-from config import Config
+from src.settings import get_alpaca_base_url
 from src.account.account_manager import AccountManager
 from src.strategy.base import ActionPlan
 
@@ -64,18 +64,13 @@ class ExecutionEngine:
         self.logger = logging.getLogger(f"ExecutionEngine.{asset_type}")
 
         if account_manager is None:
-            base_url = getattr(Config, "ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
-            account_manager = AccountManager(base_url=base_url)
+            account_manager = AccountManager(base_url=get_alpaca_base_url())
         self.account_manager = account_manager
 
     def load_context(self) -> ExecutionContext:
-        account_info = self.trading_engine.get_account_info() or {}
-        account_raw = self.account_manager.get_account() or {}
-        account_config = self.account_manager.get_account_configurations() or {}
-        if "error" in account_config:
-            account_config = {}
-        if "error" in account_raw:
-            account_raw = {}
+        account_info = self.trading_engine.get_account_info()
+        account_raw = self.account_manager.get_account()
+        account_config = self.account_manager.get_account_configurations()
 
         account_type = str(
             account_raw.get("account_type") or account_info.get("account_type") or ""
@@ -424,18 +419,23 @@ class ExecutionEngine:
         if buying_power <= 0 or price <= 0:
             return 0.0
         max_qty = buying_power / price
-        if context.fractional_enabled or self.asset_type == "crypto":
+        if self._fractional_allowed(context):
             return max_qty
         return float(int(max_qty))
 
     def _adjust_for_fractional(self, quantity: float, context: ExecutionContext) -> float:
         if quantity <= 0:
             return 0.0
-        if self.asset_type == "crypto":
-            return quantity
-        if context.fractional_enabled:
+        if self._fractional_allowed(context):
             return quantity
         return float(int(quantity))
+
+    def _fractional_allowed(self, context: ExecutionContext) -> bool:
+        if self.asset_type == "crypto":
+            return True
+        if not context.fractional_enabled:
+            return False
+        return bool(getattr(self.trading_engine, "allow_fractional", False))
 
     @staticmethod
     def _position_side(position: Any) -> str:
