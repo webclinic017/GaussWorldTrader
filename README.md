@@ -11,7 +11,9 @@
     </a>
   </p>
   <p>
-    <strong>Gauss World Trader</strong> — <em>A high-performance, Python 3.12+ optimized algorithmic trading platform featuring modern async operations, intelligent data feeds, and advanced portfolio management.</em>
+    <strong>Gauss World Trader</strong> — <em>A high-performance, Python 3.12+ optimized
+    algorithmic trading platform featuring modern async operations, intelligent data
+    feeds, multi-agent analysis, and advanced portfolio management.</em>
   </p>
   <p>
     <strong>Named after Carl Friedrich Gauss</strong>, who revolutionized statistics and probability theory — the foundations of modern quantitative finance.
@@ -39,7 +41,8 @@ Algorithmic trading is used by individual traders, hedge funds, and institutions
 GaussWorldTrader is an open-source algorithmic trading platform designed for both learning and practical use.
 
 - **Multiple Asset Classes** — Trade stocks, cryptocurrencies, and options through a unified interface
-- **Pre-built Strategies** — Ready-to-use strategies including momentum, value investing, trend following, and more
+- **Pre-built Strategies** — Ready-to-use strategies including momentum, value investing,
+  trend following, multi-agent trading, and more
 - **Educational Foundation** — Clear code structure and documentation to help you understand how trading systems work
 - **Real-time & Backtesting** — Test strategies on historical data or run them live with paper or real money
 - **Modern Architecture** — Built with Python 3.12+ using async patterns for efficient data processing
