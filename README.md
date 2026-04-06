@@ -84,6 +84,8 @@ Whether you're a beginner learning about markets or an experienced trader buildi
 - **Strategy and Execution Layers** — Signals and plans live in strategies; sizing and orders live in execution
 - **💼 Portfolio Management** — Advanced position tracking and risk management
 - **🔌 Multi-source Data Feeds** — Alpaca, Finnhub, FRED, and News integrations
+- **🤖 Multi-Agent Trading** — Committee-style stock analysis with `fast` and `llm` modes
+- **🧪 Vectorbt Backtests** — Stock and crypto backtests run through `vectorbt`; options stay on the legacy path
 - **🧩 Options Multi-Leg Orders** — `TradingOptionEngine` supports MLEG submissions
 - **🧮 Options Vertical Spreads** — IV/greeks-filtered bull/bear call/put spreads via multi-leg orders
 
@@ -95,8 +97,11 @@ Whether you're a beginner learning about markets or an experienced trader buildi
   `ActionPlan` in `get_action_plan()` (target price, stop loss, take profit, intent).
 - **Execution layer** (`ExecutionEngine`) turns an `ActionPlan` into concrete orders: sizes quantity,
   enforces account limits (fractional, shorting, margin), and applies order type policy.
-- **Live trading** runs on `live_trading_*.py` using the execution layer, while the dashboard/backtester
-  still uses `generate_signals()` as a legacy wrapper.
+- **Live trading** runs on `live_trading_*.py` using the execution layer.
+- **Backtesting** uses `vectorbt` for stock and crypto strategies and keeps the legacy engine for
+  option strategies.
+- **Dashboard analysis** can run the multi-agent stock strategy directly and render agent reports,
+  risk assessment, debate output, and usage metadata.
 
 Order type default (`auto`): if a plan provides a target price, a limit order is used (price improved by
 the minimum tick); otherwise a market order is used. Sell-to-open is disabled by default and only used
@@ -144,8 +149,10 @@ python main_cli.py list-strategies
 
 ```bash
 python main_cli.py list-strategies              # List all available strategies
-python main_cli.py run-strategy momentum AAPL MSFT --days 90
-python main_cli.py backtest momentum AAPL --days 365
+python main_cli.py run-strategy --strategy momentum AAPL MSFT --days 90
+python main_cli.py backtest --strategy mean_reversion AAPL --days 365
+python main_cli.py backtest --strategy multi_agent AAPL --days 120 -p mode=fast
+python main_cli.py backtest --strategy trend_following AAPL --days 365 --walk-forward --splits 4
 python main_cli.py account-info                 # View account details
 python main_cli.py stream-market --asset-type crypto --crypto-loc eu-1 --symbols BTC/USD,ETH/USD
 ```
@@ -167,8 +174,8 @@ The unified CLI provides:
 **Strategy Selection by Asset Type:**
 | Asset Type | Available Strategies |
 |------------|---------------------|
-| Stock | momentum, value, trend_following, scalping, statistical_arbitrage |
-| Crypto | crypto_momentum |
+| Stock | momentum, mean_reversion, macro_factor, multi_agent, value, trend_following, scalping, statistical_arbitrage |
+| Crypto | crypto_momentum, btc_volatility_breakout |
 | Option | wheel |
 
 Note: `crypto_momentum` is the unified MomentumStrategy configured with crypto defaults.
@@ -180,6 +187,8 @@ Notes:
 - Defaults are pulled from `watchlist.json` + current positions for each asset type.
 - Live trading checks account capabilities up front; fractional/shorting prompts appear only when supported.
 - Sell-to-open remains disabled unless the user explicitly enables it.
+- Choosing `multi_agent` in the live stock CLI now prompts for `fast` or `llm` mode before startup.
+- `fast` mode avoids LLM calls and is the safer default for routine live paper-trading tests.
 
 ---
 
@@ -227,8 +236,12 @@ order = engine.place_market_order("BTC/USD", 0.001, "buy")  # Triggers SUBMITTED
 
 | Strategy | Category | Dashboard |
 |----------|----------|-----------|
+| 🤖 Multi-Agent | Signal | ✅ |
+| 📉 Mean Reversion | Signal | ✅ |
+| 🌍 Macro Factor | Signal | ✅ |
 | 📈 Momentum | Signal | ✅ |
 | 🪙 Crypto Momentum | Signal | ✅ |
+| ₿ BTC Volatility Breakout | Signal | ✅ |
 | 💰 Value | Signal | ✅ |
 | 📉 Trend Following | Signal | ✅ |
 | ⚡ Scalping | Signal | ✅ |
@@ -306,6 +319,10 @@ Create a `.env` file with the following API keys:
 | `ALPACA_BASE_URL` | ✅ | Alpaca API endpoint |
 | `FINNHUB_API_KEY` | ✅ | Finnhub market data |
 | `FRED_API_KEY` | ✅ | Federal Reserve economic data |
+| `OPENAI_API_KEY` | ❌ | Required for `multi_agent` in `llm` mode when using OpenAI |
+| `MULTI_AGENT_MODE` | ❌ | Default multi-agent mode: `fast` or `llm` |
+| `MULTI_AGENT_LLM_PROVIDER` | ❌ | Override the LLM provider for multi-agent runs |
+| `MULTI_AGENT_LLM_MODEL` | ❌ | Override the model used by multi-agent runs |
 | `NOTIFICATION_EMAIL_ENABLED` | ❌ | Enable email notifications (true/false) |
 | `GMAIL_ADDRESS` | ❌ | Gmail address for notifications |
 | `GMAIL_APP_PASSWORD` | ❌ | Gmail app password |
@@ -335,6 +352,20 @@ Watchlist entries are typed by asset so the dashboard and live scripts can filte
 
 - Supported `asset_type`: `stock`, `crypto`, `option`.
 - The dashboard Watchlist tab lets you add/remove symbols with an asset type.
+
+---
+
+## 🤖 Multi-Agent Mode
+
+The `multi_agent` strategy is a stock-only committee strategy with technical, fundamental,
+sentiment, risk, and decision agents.
+
+- `fast` mode skips LLM calls and uses deterministic weighted voting for backtests, dashboard
+  runs, and safer live-paper tests.
+- `llm` mode uses the configured LLM provider for agent reports and final decisions.
+- The dashboard `Live Analysis -> 🤖 Multi-Agent` panel shows the final action, confidence,
+  risk assessment, agent reports, debate positions, and usage data.
+- Dashboard backtests force `multi_agent` to `fast` mode to avoid live LLM and news costs.
 
 ---
 

@@ -16,6 +16,14 @@ import requests
 T = TypeVar("T")
 
 
+def _resolve_model(model: str | None, default: str) -> str:
+    """Return a provider default when model is missing or blank."""
+    if model is None:
+        return default
+    cleaned = model.strip()
+    return cleaned or default
+
+
 @dataclass(slots=True)
 class LLMUsage:
     """Token usage reported by an LLM provider."""
@@ -378,8 +386,11 @@ def _load_codex_access_token(auth_file: str | None = None) -> str:
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI GPT provider."""
 
-    def __init__(self, api_key: str | None = None, model: str = "gpt-4"):
-        super().__init__(api_key or os.getenv("OPENAI_API_KEY") or "", model)
+    def __init__(self, api_key: str | None = None, model: str | None = "gpt-4"):
+        super().__init__(
+            api_key or os.getenv("OPENAI_API_KEY") or "",
+            _resolve_model(model, "gpt-4"),
+        )
         self.base_url = "https://api.openai.com/v1"
 
     def _authorization_token(self) -> str:
@@ -457,9 +468,9 @@ class OpenAICodexProvider(OpenAIProvider):
     def __init__(
         self,
         auth_file: str | None = None,
-        model: str = "gpt-5.4",
+        model: str | None = "gpt-5.4",
     ):
-        super().__init__(api_key="", model=model)
+        super().__init__(api_key="", model=_resolve_model(model, "gpt-5.4"))
         self.auth_file = auth_file
 
     def _authorization_token(self) -> str:
@@ -469,8 +480,15 @@ class OpenAICodexProvider(OpenAIProvider):
 class DeepSeekProvider(BaseLLMProvider):
     """DeepSeek AI provider."""
 
-    def __init__(self, api_key: str | None = None, model: str = "deepseek-chat"):
-        super().__init__(api_key or os.getenv("DEEPSEEK_API_KEY"), model)
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = "deepseek-chat",
+    ):
+        super().__init__(
+            api_key or os.getenv("DEEPSEEK_API_KEY"),
+            _resolve_model(model, "deepseek-chat"),
+        )
         self.base_url = "https://api.deepseek.com/v1"
 
     def generate_response_with_metadata(
@@ -542,9 +560,12 @@ class ClaudeProvider(BaseLLMProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "claude-3-sonnet-20240229",
+        model: str | None = "claude-3-sonnet-20240229",
     ):
-        super().__init__(api_key or os.getenv("ANTHROPIC_API_KEY"), model)
+        super().__init__(
+            api_key or os.getenv("ANTHROPIC_API_KEY"),
+            _resolve_model(model, "claude-3-sonnet-20240229"),
+        )
         self.base_url = "https://api.anthropic.com/v1"
 
     def generate_response_with_metadata(
@@ -608,9 +629,12 @@ class MoonshotProvider(BaseLLMProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "moonshot-v1-8k",
+        model: str | None = "moonshot-v1-8k",
     ):
-        super().__init__(api_key or os.getenv("MOONSHOT_API_KEY"), model)
+        super().__init__(
+            api_key or os.getenv("MOONSHOT_API_KEY"),
+            _resolve_model(model, "moonshot-v1-8k"),
+        )
         self.base_url = "https://api.moonshot.cn/v1"
 
     def generate_response_with_metadata(
@@ -706,4 +730,5 @@ def create_provider(provider_name: str, **kwargs: Any) -> BaseLLMProvider:
     }
     if provider_name not in providers:
         raise ValueError(f"Unknown provider: {provider_name}")
-    return providers[provider_name](**kwargs)
+    clean_kwargs = {key: value for key, value in kwargs.items() if value is not None}
+    return providers[provider_name](**clean_kwargs)

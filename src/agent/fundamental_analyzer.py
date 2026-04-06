@@ -4,6 +4,7 @@ Fundamental Analysis Engine with AI Integration
 Combines financial data with AI analysis to generate comprehensive reports
 """
 
+from collections.abc import Callable
 import pandas as pd
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
@@ -73,6 +74,19 @@ class FundamentalAnalyzer:
         
         return analysis_result
 
+    def _load_optional_data(
+        self,
+        label: str,
+        fetcher: Callable[[], Any],
+        default_factory: Callable[[], Any],
+    ) -> Any:
+        """Return provider data when available and log entitlement failures."""
+        try:
+            return fetcher()
+        except Exception as exc:
+            self.logger.warning("Skipping %s: %s", label, exc)
+            return default_factory()
+
     def _get_comprehensive_market_data(
         self,
         symbol: str,
@@ -87,28 +101,68 @@ class FundamentalAnalyzer:
         anchor_date_str = anchor_date.strftime('%Y-%m-%d')
 
         # Finnhub data
-        data['company_profile'] = self.finnhub.get_company_profile(symbol)
-        data['basic_financials'] = self.finnhub.get_basic_financials(symbol)
-        data['company_news'] = self.finnhub.get_company_news(
-            symbol,
-            from_date=news_start_date,
-            to_date=anchor_date_str,
+        data['company_profile'] = self._load_optional_data(
+            f"company profile for {symbol}",
+            lambda: self.finnhub.get_company_profile(symbol),
+            dict,
         )
-        data['recommendations'] = self.finnhub.get_recommendation_trends(symbol)
-        data['price_target'] = self.finnhub.get_price_target(symbol)
-        data['quote'] = self.finnhub.get_quote(symbol)
-        data['earnings_surprises'] = self.finnhub.get_earnings_surprises(symbol)
-        data['insider_transactions'] = self.finnhub.get_insider_transactions(symbol)
-        data['insider_sentiment'] = self.finnhub.get_insider_sentiment(
-            symbol,
-            from_date=sentiment_start_date,
-            to_date=anchor_date_str,
+        data['basic_financials'] = self._load_optional_data(
+            f"basic financials for {symbol}",
+            lambda: self.finnhub.get_basic_financials(symbol),
+            dict,
+        )
+        data['company_news'] = self._load_optional_data(
+            f"company news for {symbol}",
+            lambda: self.finnhub.get_company_news(
+                symbol,
+                from_date=news_start_date,
+                to_date=anchor_date_str,
+            ),
+            list,
+        )
+        data['recommendations'] = self._load_optional_data(
+            f"recommendation trends for {symbol}",
+            lambda: self.finnhub.get_recommendation_trends(symbol),
+            list,
+        )
+        data['price_target'] = self._load_optional_data(
+            f"price target for {symbol}",
+            lambda: self.finnhub.get_price_target(symbol),
+            dict,
+        )
+        data['quote'] = self._load_optional_data(
+            f"quote for {symbol}",
+            lambda: self.finnhub.get_quote(symbol),
+            dict,
+        )
+        data['earnings_surprises'] = self._load_optional_data(
+            f"earnings surprises for {symbol}",
+            lambda: self.finnhub.get_earnings_surprises(symbol),
+            list,
+        )
+        data['insider_transactions'] = self._load_optional_data(
+            f"insider transactions for {symbol}",
+            lambda: self.finnhub.get_insider_transactions(symbol),
+            list,
+        )
+        data['insider_sentiment'] = self._load_optional_data(
+            f"insider sentiment for {symbol}",
+            lambda: self.finnhub.get_insider_sentiment(
+                symbol,
+                from_date=sentiment_start_date,
+                to_date=anchor_date_str,
+            ),
+            dict,
         )
 
         # FRED economic data
-        data['economic_indicators'] = self.fred.get_economic_indicators(
-            economic_start_date,
-            anchor_date_str,
+        data['economic_indicators'] = self._load_optional_data(
+            "economic indicators",
+            lambda: self.fred.get_economic_indicators(
+                economic_start_date,
+                anchor_date_str,
+            ),
+            dict,
         )
 
         return data
@@ -214,12 +268,22 @@ class FundamentalAnalyzer:
             'transactions': None,
             'sentiment': None,
         }
+        transactions = (
+            insider_transactions
+            if isinstance(insider_transactions, list)
+            else []
+        )
+        sentiment_payload = (
+            insider_sentiment
+            if isinstance(insider_sentiment, dict)
+            else {}
+        )
         
         # Analyze insider transactions
-        if insider_transactions:
+        if transactions:
             transactions_analysis = {
-                'total_transactions': len(insider_transactions),
-                'recent_count': len([t for t in insider_transactions[:10]]),
+                'total_transactions': len(transactions),
+                'recent_count': len(transactions[:10]),
                 'net_change': 0,
                 'buy_transactions': 0,
                 'sell_transactions': 0,
@@ -227,7 +291,7 @@ class FundamentalAnalyzer:
             }
             
             # Calculate aggregated metrics
-            for transaction in insider_transactions[:20]:  # Recent 20 transactions
+            for transaction in transactions[:20]:  # Recent 20 transactions
                 change = transaction.get('change', 0)
                 if isinstance(change, (int, float)):
                     transactions_analysis['net_change'] += change
@@ -257,8 +321,8 @@ class FundamentalAnalyzer:
             analysis['transactions'] = transactions_analysis
         
         # Analyze insider sentiment
-        if insider_sentiment and 'data' in insider_sentiment:
-            sentiment_data = insider_sentiment['data']
+        if sentiment_payload and 'data' in sentiment_payload:
+            sentiment_data = sentiment_payload['data']
             if sentiment_data:
                 latest_data = sentiment_data[-1] if sentiment_data else {}
                 

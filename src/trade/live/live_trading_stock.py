@@ -1,22 +1,23 @@
 """Live stock trading with market hours awareness."""
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
 import logging
-from typing import Any, List, Optional
+from datetime import datetime, time, timedelta
+from typing import TYPE_CHECKING, Any
 
 import pytz
 
-from src.watchlist import WatchlistManager
-from src.strategy.base import StrategyBase
 from src.strategy.registry import get_strategy_registry
+from src.trade.engine import TradingStockEngine
 from src.utils.asset_utils import merge_symbol_sources, positions_for_asset_type
 from src.utils.timezone_utils import format_duration
+from src.watchlist import WatchlistManager
 
-from .live_trading_base import LiveTradingEngine
 from .live_runner import run_live_engines
-from src.trade.engine import TradingStockEngine
+from .live_trading_base import LiveTradingEngine
 
+if TYPE_CHECKING:
+    from src.strategy.base import StrategyBase
 
 EASTERN = pytz.timezone("US/Eastern")
 
@@ -49,12 +50,14 @@ class LiveTradingStock(LiveTradingEngine):
         allow_fractional: bool = False,
         extended_hours: bool = False,
         strategy: str = "momentum",
+        strategy_params: dict[str, Any] | None = None,
         allow_sell_to_open: bool = False,
         order_type: str = "auto",
     ) -> None:
         self.allow_fractional = allow_fractional
         self.extended_hours = extended_hours
         self.strategy_name = strategy
+        self.strategy_params = dict(strategy_params or {})
         super().__init__(
             symbol=symbol,
             timeframe=timeframe,
@@ -79,7 +82,10 @@ class LiveTradingStock(LiveTradingEngine):
 
     def _get_strategy(self) -> StrategyBase:
         """Return the configured strategy."""
-        return get_strategy_registry().create(self.strategy_name)
+        return get_strategy_registry().create(
+            self.strategy_name,
+            self.strategy_params,
+        )
 
     def _create_stream(self) -> Any:
         """Create stock data stream."""
@@ -159,7 +165,7 @@ class LiveTradingStock(LiveTradingEngine):
         return self.symbol
 
 
-def get_default_stock_symbols() -> List[str]:
+def get_default_stock_symbols() -> list[str]:
     """Get default stock symbols from watchlist and open positions."""
     manager = WatchlistManager()
     watchlist_symbols = manager.get_watchlist(asset_type="stock")
@@ -170,7 +176,7 @@ def get_default_stock_symbols() -> List[str]:
 
 
 def create_stock_engines(
-    symbols: Optional[List[str]] = None,
+    symbols: list[str] | None = None,
     timeframe: str = "1Hour",
     lookback_days: int = 30,
     risk_pct: float = 0.05,
@@ -181,9 +187,10 @@ def create_stock_engines(
     fractional: bool = False,
     extended_hours: bool = False,
     strategy: str = "momentum",
+    strategy_params: dict[str, Any] | None = None,
     allow_sell_to_open: bool = False,
     order_type: str = "auto",
-) -> List[LiveTradingStock]:
+) -> list[LiveTradingStock]:
     """Create stock trading engines without starting them.
 
     Returns:
@@ -205,6 +212,7 @@ def create_stock_engines(
             allow_fractional=fractional,
             extended_hours=extended_hours,
             strategy=strategy,
+            strategy_params=strategy_params,
             allow_sell_to_open=allow_sell_to_open,
             order_type=order_type,
         )
@@ -213,7 +221,7 @@ def create_stock_engines(
 
 
 def run_stock_trading(
-    symbols: Optional[List[str]] = None,
+    symbols: list[str] | None = None,
     timeframe: str = "1Hour",
     lookback_days: int = 30,
     risk_pct: float = 0.05,

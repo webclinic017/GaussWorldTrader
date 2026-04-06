@@ -3,20 +3,22 @@ Dashboard utilities for data processing and formatting.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import streamlit as st
+
 from src.utils.timezone_utils import now_et
-from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
 # Dashboard Utilities
 def generate_transaction_log(
-    results: Dict[str, Any], symbols: List[str]
-) -> Optional[str]:
+    results: dict[str, Any], _symbols: list[str]
+) -> str | None:
     """Generate enhanced transaction log for dashboard download"""
     if not results or 'trades_history' not in results:
         return None
@@ -29,7 +31,7 @@ def generate_transaction_log(
     positions = {}
     trade_counter = 1
 
-    for idx, trade in trades_df.iterrows():
+    for _idx, trade in trades_df.iterrows():
         symbol = trade['symbol']
         action = trade['action'].upper()
         quantity = abs(trade['quantity'])
@@ -114,31 +116,33 @@ def generate_transaction_log(
     return filename
 
 
-def calculate_portfolio_metrics(positions: List[Dict]) -> Dict[str, Any]:
+def calculate_portfolio_metrics(positions: list[dict]) -> dict[str, Any]:
     """
     Calculate comprehensive portfolio metrics
     """
     if not positions:
         return {}
-    
+
     active_positions = [p for p in positions if float(p.get('qty', 0)) != 0]
-    
+
     if not active_positions:
         return {}
-    
+
     total_value = sum(float(pos.get('market_value', 0)) for pos in active_positions)
     total_cost = sum(float(pos.get('cost_basis', 0)) for pos in active_positions)
     total_pnl = sum(float(pos.get('unrealized_pl', 0)) for pos in active_positions)
-    
+
     # Calculate concentration metrics
     values = [float(pos.get('market_value', 0)) for pos in active_positions]
     largest_position = max(values) if values else 0
     concentration_ratio = (largest_position / total_value * 100) if total_value > 0 else 0
-    
+
     # Calculate sector diversification (simplified)
     num_positions = len(active_positions)
-    diversification_score = min(100, (num_positions / 10) * 100)  # Max 10 positions for full diversification
-    
+    diversification_score = min(
+        100, (num_positions / 10) * 100
+    )  # Max 10 positions for full diversification
+
     return {
         'total_value': total_value,
         'total_cost': total_cost,
@@ -151,40 +155,40 @@ def calculate_portfolio_metrics(positions: List[Dict]) -> Dict[str, Any]:
     }
 
 
-def calculate_risk_metrics(portfolio_history: pd.DataFrame) -> Dict[str, Any]:
+def calculate_risk_metrics(portfolio_history: pd.DataFrame) -> dict[str, Any]:
     """
     Calculate advanced risk metrics for portfolio
     """
     if portfolio_history.empty or 'portfolio_value' not in portfolio_history.columns:
         return {}
-    
+
     values = portfolio_history['portfolio_value']
-    
+
     # Calculate returns
     returns = values.pct_change().dropna()
-    
+
     if returns.empty:
         return {}
-    
+
     # Risk metrics
     volatility = returns.std() * np.sqrt(252)  # Annualized volatility
     downside_returns = returns[returns < 0]
     downside_volatility = downside_returns.std() * np.sqrt(252) if not downside_returns.empty else 0
-    
+
     # Drawdown analysis
     running_max = values.expanding().max()
     drawdown = (values - running_max) / running_max
     max_drawdown = drawdown.min() * 100
-    
+
     # VaR calculation (5% VaR)
     var_95 = np.percentile(returns, 5) * 100 if len(returns) > 0 else 0
-    
+
     # Sharpe and Sortino ratios
     risk_free_rate = 0.02  # Assume 2% risk-free rate
     excess_returns = returns.mean() * 252 - risk_free_rate
     sharpe_ratio = excess_returns / volatility if volatility > 0 else 0
     sortino_ratio = excess_returns / downside_volatility if downside_volatility > 0 else 0
-    
+
     return {
         'volatility': volatility * 100,
         'max_drawdown': max_drawdown,
@@ -196,29 +200,33 @@ def calculate_risk_metrics(portfolio_history: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def format_crypto_data(crypto_response: Dict) -> Dict[str, Any]:
+def format_crypto_data(crypto_response: dict) -> dict[str, Any]:
     """
     Format cryptocurrency data for dashboard display
     """
     if not crypto_response:
         raise ValueError("crypto_response is required")
-    
+
     # Extract price information
     price_usd = crypto_response.get('bid_price', 0)
     timestamp = crypto_response.get('timestamp', datetime.now())
-    
+
     # Format for display
     formatted_data = {
         'symbol': 'BTC',
         'price_usd': price_usd,
         'price_eur': price_usd * 0.85,  # Approximate EUR conversion
         'price_gbp': price_usd * 0.75,  # Approximate GBP conversion
-        'last_updated': timestamp.strftime('%Y-%m-%d %H:%M:%S') if hasattr(timestamp, 'strftime') else str(timestamp),
+        'last_updated': (
+            timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            if hasattr(timestamp, 'strftime')
+            else str(timestamp)
+        ),
         'market_cap': price_usd * 19_500_000,  # Approximate BTC supply
         'volume_24h': None,
         'change_24h': None
     }
-    
+
     return formatted_data
 
 
@@ -229,7 +237,7 @@ def get_default_symbols(asset_type: str = "stock"):
     symbols = []
     seen = set()
     normalized_type = normalize_asset_type(asset_type)
-    
+
     if 'watchlist_manager' in st.session_state:
         watchlist = st.session_state.watchlist_manager.get_watchlist(
             asset_type=normalized_type
@@ -252,7 +260,7 @@ def get_default_symbols(asset_type: str = "stock"):
                     if normalized and normalized not in seen:
                         seen.add(normalized)
                         symbols.append(normalized)
-    
+
     return symbols
 
 
@@ -260,19 +268,24 @@ def format_strategy_comparison(comparison_results, symbol):
     """Format strategy comparison results for display"""
     if not comparison_results:
         return None
-    
-    valid_results = [r for r in comparison_results if r['Total Return'] != 'Error' and 'Error:' not in str(r['Total Return'])]
+
+    valid_results = [
+        r
+        for r in comparison_results
+        if r['Total Return'] != 'Error'
+        and 'Error:' not in str(r['Total Return'])
+    ]
     if not valid_results:
         return None
-    
+
     strategies_names = [r['Strategy'] for r in valid_results]
     returns = [float(r['Total Return'].rstrip('%')) for r in valid_results]
-    
+
     if returns and len(valid_results) > 1:
         best_return_idx = returns.index(max(returns))
         best_return_strategy = strategies_names[best_return_idx]
         avg_return = sum(returns) / len(returns)
-        
+
         return {
             'chart_data': {
                 'strategies': strategies_names,
@@ -283,20 +296,24 @@ def format_strategy_comparison(comparison_results, symbol):
             'best_return': max(returns),
             'average_return': avg_return
         }
-    
+
     return None
 
 
 def render_economic_data():
     """Render economic calendar with real FRED data"""
     st.subheader("📅 Economic Calendar")
-    
+
     try:
         if 'fred_provider' not in st.session_state:
             raise RuntimeError("FRED provider not initialized")
 
         fred = st.session_state.fred_provider
-        indicators = {'UNRATE': 'Unemployment Rate', 'CPIAUCSL': 'CPI', 'FEDFUNDS': 'Fed Funds Rate'}
+        indicators = {
+            'UNRATE': 'Unemployment Rate',
+            'CPIAUCSL': 'CPI',
+            'FEDFUNDS': 'Fed Funds Rate',
+        }
 
         col1, col2, col3 = st.columns(3)
         for i, (series_id, name) in enumerate(indicators.items()):

@@ -419,18 +419,23 @@ class ExecutionEngine:
         if buying_power <= 0 or price <= 0:
             return 0.0
         max_qty = buying_power / price
-        if context.fractional_enabled or self.asset_type == "crypto":
+        if self._fractional_allowed(context):
             return max_qty
         return float(int(max_qty))
 
     def _adjust_for_fractional(self, quantity: float, context: ExecutionContext) -> float:
         if quantity <= 0:
             return 0.0
-        if self.asset_type == "crypto":
-            return quantity
-        if context.fractional_enabled:
+        if self._fractional_allowed(context):
             return quantity
         return float(int(quantity))
+
+    def _fractional_allowed(self, context: ExecutionContext) -> bool:
+        if self.asset_type == "crypto":
+            return True
+        if not context.fractional_enabled:
+            return False
+        return bool(getattr(self.trading_engine, "allow_fractional", False))
 
     @staticmethod
     def _position_side(position: Any) -> str:

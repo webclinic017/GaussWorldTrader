@@ -23,19 +23,17 @@ from src.account.account_manager import AccountManager
 from src.account.order_manager import OrderManager
 from src.account.position_manager import PositionManager
 from src.agent.fundamental_analyzer import FundamentalAnalyzer
-from src.watchlist import WatchlistManager
 from src.analysis import TechnicalAnalysis
-from src.data import AlpacaDataProvider, NewsDataProvider
-from src.data import FREDProvider
-from src.strategy import get_strategy_registry
 from src.backtest import Backtester
-from src.utils.timezone_utils import get_market_status, now_et
-
-from src.ui.market_views import MarketViewsMixin
+from src.data import AlpacaDataProvider, FREDProvider, NewsDataProvider
+from src.strategy import get_strategy_registry
 from src.ui.account_views import AccountViewsMixin
-from src.ui.trading_views import TradingViewsMixin
 from src.ui.analysis_views import AnalysisViewsMixin
+from src.ui.market_views import MarketViewsMixin
+from src.ui.trading_views import TradingViewsMixin
 from src.ui.ui_components import UIComponents
+from src.utils.timezone_utils import get_market_status, now_et
+from src.watchlist import WatchlistManager
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +56,7 @@ def _format_timestamp(value):
 
 def _format_raw(data):
     """Format raw stream data for display."""
-    return data if isinstance(data, (dict, list, str, int, float)) else repr(data)
+    return data if isinstance(data, dict | list | str | int | float) else repr(data)
 
 
 class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, AnalysisViewsMixin):
@@ -178,9 +176,9 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
         sma_20 = data['close'].rolling(window=20).mean()
         sma_50 = data['close'].rolling(window=min(50, len(data))).mean()
         fig.add_trace(go.Scatter(x=data.index, y=sma_20, mode='lines', name='SMA 20',
-                                 line=dict(color='orange', width=1)))
+                                 line={"color": "orange", "width": 1}))
         fig.add_trace(go.Scatter(x=data.index, y=sma_50, mode='lines', name='SMA 50',
-                                 line=dict(color='purple', width=1)))
+                                 line={"color": "purple", "width": 1}))
         fig.update_layout(title=f"{symbol} Price Chart", height=500, showlegend=True)
         return fig
 
@@ -193,19 +191,28 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
             strategy_name = strategy_type.lower().replace(' ', '_')
             registry = get_strategy_registry()
             try:
-                strategy = registry.create(strategy_name)
+                registry.get_meta(strategy_name)
             except KeyError:
                 available = registry.list_strategies(dashboard_only=True)
                 for name in available:
                     if name.replace('_', ' ').title() == strategy_type:
-                        strategy = registry.create(name)
+                        strategy = self._create_backtest_strategy(name)
                         break
                 else:
                     return None, f"Strategy '{strategy_type}' not found"
+            else:
+                strategy = self._create_backtest_strategy(strategy_name)
+
+            asset_type = strategy.meta.asset_type
 
             backtester = Backtester(initial_cash=initial_cash, commission=0.01)
             for symbol in symbols:
-                data = provider.get_bars(symbol, "1Day", start=start_date)
+                data = self._load_backtest_data(
+                    provider,
+                    symbol,
+                    asset_type,
+                    start_date,
+                )
                 if data is not None and not data.empty:
                     backtester.add_data(symbol, data)
 
@@ -220,14 +227,15 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
                 strategy=strategy,
             )
             if results:
+                summary = results.get("summary", results)
                 return {
-                    'total_return_percentage': results.get('total_return_percentage', 0),
-                    'sharpe_ratio': results.get('sharpe_ratio', 0),
-                    'max_drawdown_percentage': results.get('max_drawdown_percentage', 0),
-                    'win_rate': results.get('win_rate', 0),
-                    'total_trades': results.get('total_trades', 0),
-                    'final_value': results.get('final_value', initial_cash),
-                    'volatility': results.get('volatility', 0),
+                    'total_return_percentage': summary.get('total_return_percentage', 0),
+                    'sharpe_ratio': summary.get('sharpe_ratio', 0),
+                    'max_drawdown_percentage': summary.get('max_drawdown_percentage', 0),
+                    'win_rate': summary.get('win_rate', 0),
+                    'total_trades': summary.get('total_trades', 0),
+                    'final_value': summary.get('final_value', initial_cash),
+                    'volatility': summary.get('volatility', 0),
                     'portfolio_history': results.get('portfolio_history'),
                     'trades_history': results.get('trades_history'),
                 }, None
@@ -253,7 +261,7 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=portfolio_history.index, y=portfolio_history['portfolio_value'],
-                mode='lines', name='Portfolio Value', line=dict(color='blue', width=2)
+                mode='lines', name='Portfolio Value', line={"color": "blue", "width": 2}
             ))
             fig.update_layout(title="Portfolio Performance", yaxis_title="Value ($)", height=400)
             st.plotly_chart(fig, use_container_width=True)
@@ -334,10 +342,12 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
     def render_live_analysis_tab_extended(self):
         """Extended live analysis with market stream."""
         st.header("🔍 Live Analysis")
-        analysis_tabs = st.tabs(["📊 Historical Market", "📡 Market Stream"])
+        analysis_tabs = st.tabs(["📊 Historical Market", "🤖 Multi-Agent", "📡 Market Stream"])
         with analysis_tabs[0]:
             self.render_symbol_analysis_extended()
         with analysis_tabs[1]:
+            self.render_multi_agent_analysis_extended()
+        with analysis_tabs[2]:
             self.render_market_stream_extended()
 
     def render_symbol_analysis_extended(self):
@@ -377,6 +387,280 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
                 else:
                     st.error(f"Unable to load data for {symbol}: {error}")
 
+    def render_multi_agent_analysis_extended(self):
+        """Render a dedicated multi-agent decision view."""
+        st.subheader("🤖 Multi-Agent Analysis")
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            from src.ui.dashboard_utils import get_default_symbols
+
+            default_symbols = get_default_symbols("stock")
+            symbol = st.selectbox(
+                "Symbol",
+                default_symbols or self._default_symbols_for_asset("stock"),
+                key="multi_agent_symbol",
+            )
+            lookback_days = st.slider(
+                "Lookback (days)",
+                30,
+                365,
+                120,
+                key="multi_agent_lookback",
+            )
+            mode = st.selectbox(
+                "Mode",
+                ["fast", "llm"],
+                key="multi_agent_mode",
+            )
+            debate_enabled = st.checkbox(
+                "Enable debate",
+                value=False,
+                disabled=mode == "fast",
+                key="multi_agent_debate",
+            )
+            if mode == "fast":
+                st.caption("Fast mode skips LLM calls. Debate is available only in llm mode.")
+            if st.button(
+                "Run Multi-Agent Analysis",
+                type="primary",
+                key="run_multi_agent_analysis",
+            ):
+                result, error = self._run_multi_agent_analysis(
+                    symbol,
+                    lookback_days,
+                    mode,
+                    debate_enabled,
+                )
+                st.session_state.multi_agent_analysis_result = result
+                st.session_state.multi_agent_analysis_error = error
+
+        with col2:
+            error = st.session_state.get("multi_agent_analysis_error")
+            result = st.session_state.get("multi_agent_analysis_result")
+            if error:
+                st.error(error)
+                return
+            if not result:
+                st.info("Select a stock symbol and run the multi-agent analysis.")
+                return
+            self._render_multi_agent_analysis_result(result)
+
+    def _run_multi_agent_analysis(
+        self,
+        symbol: str,
+        lookback_days: int,
+        mode: str,
+        debate_enabled: bool,
+    ) -> tuple[dict | None, str | None]:
+        """Run the multi-agent strategy once and return structured results."""
+        try:
+            provider = AlpacaDataProvider()
+            current_date = now_et()
+            start_date = current_date - timedelta(days=lookback_days)
+            bars = provider.get_bars(symbol, "1Day", start=start_date)
+            if bars.empty:
+                return None, f"No data available for {symbol}"
+
+            strategy = get_strategy_registry().create(
+                "multi_agent",
+                {
+                    "mode": mode,
+                    "debate_enabled": debate_enabled,
+                },
+            )
+            current_price = float(bars["close"].iloc[-1])
+            snapshot = strategy.get_signal(
+                symbol=symbol,
+                current_date=current_date,
+                current_price=current_price,
+                current_data=bars.iloc[-1].to_dict(),
+                historical_data=bars,
+                portfolio=None,
+            )
+            if snapshot is None:
+                return None, f"Multi-agent analysis returned no decision for {symbol}"
+
+            action_plan = strategy.get_action_plan(snapshot, current_price, current_date)
+            metadata = snapshot.metadata or {}
+            return {
+                "symbol": symbol,
+                "mode": mode,
+                "lookback_days": lookback_days,
+                "current_price": current_price,
+                "timestamp": snapshot.timestamp,
+                "signal": snapshot.signal,
+                "reason": snapshot.reason,
+                "signal_strength": snapshot.signal_strength,
+                "indicators": snapshot.indicators,
+                "decision": metadata.get("decision", {}),
+                "risk_assessment": metadata.get("risk_assessment", {}),
+                "reports": metadata.get("reports", []),
+                "debate_positions": metadata.get("debate_positions", []),
+                "usage": metadata.get("usage", {}),
+                "action_plan": (
+                    None
+                    if action_plan is None
+                    else {
+                        "action": action_plan.action,
+                        "target_price": action_plan.target_price,
+                        "stop_loss": action_plan.stop_loss,
+                        "take_profit": action_plan.take_profit,
+                        "reason": action_plan.reason,
+                    }
+                ),
+            }, None
+        except Exception as exc:
+            logger.exception("Multi-agent dashboard analysis failed")
+            return None, str(exc)
+
+    def _render_multi_agent_analysis_result(self, result: dict) -> None:
+        """Render a structured multi-agent analysis result."""
+        decision = result.get("decision", {})
+        risk = result.get("risk_assessment", {})
+        st.write("**Final Decision**")
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Symbol", result["symbol"])
+        with col2:
+            st.metric("Action", decision.get("action", result.get("signal", "HOLD")))
+        with col3:
+            st.metric("Confidence", f"{float(result.get('signal_strength', 0.0)):.2f}")
+        with col4:
+            st.metric("Risk", risk.get("risk_level", "N/A"))
+        with col5:
+            st.metric("Mode", result.get("mode", "fast"))
+
+        detail_cols = st.columns(4)
+        with detail_cols[0]:
+            st.metric("Current Price", f"${float(result['current_price']):.2f}")
+        with detail_cols[1]:
+            target = decision.get("target_price")
+            st.metric("Target", "N/A" if target is None else f"${float(target):.2f}")
+        with detail_cols[2]:
+            stop_loss = decision.get("stop_loss")
+            st.metric("Stop Loss", "N/A" if stop_loss is None else f"${float(stop_loss):.2f}")
+        with detail_cols[3]:
+            take_profit = decision.get("take_profit")
+            st.metric(
+                "Take Profit",
+                "N/A" if take_profit is None else f"${float(take_profit):.2f}",
+            )
+
+        st.write(decision.get("reason", result.get("reason", "No rationale provided.")))
+        self._render_multi_agent_decision_details(decision)
+        self._render_multi_agent_risk_section(risk)
+        self._render_multi_agent_usage(result.get("usage", {}))
+        self._render_multi_agent_reports(result.get("reports", []))
+        self._render_multi_agent_debate_positions(result.get("debate_positions", []))
+
+    def _render_multi_agent_decision_details(self, decision: dict) -> None:
+        """Render participating agents and debate summary."""
+        participants = decision.get("participating_agents", [])
+        dissent = decision.get("dissenting_agents", [])
+        if participants:
+            st.caption(f"Participating agents: {', '.join(participants)}")
+        if dissent:
+            st.caption(f"Dissenting agents: {', '.join(dissent)}")
+        debate_summary = decision.get("debate_summary")
+        if debate_summary:
+            st.info(debate_summary)
+
+    def _render_multi_agent_risk_section(self, risk: dict) -> None:
+        """Render multi-agent risk assessment details."""
+        if not risk:
+            return
+        st.write("**Risk Assessment**")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Max Position", f"{float(risk.get('max_position_pct', 0.0)):.1%}")
+        with col2:
+            st.metric("Volatility", f"{float(risk.get('volatility_pct', 0.0)):.1%}")
+        with col3:
+            st.metric("ATR", f"{float(risk.get('atr', 0.0)):.2f}")
+        with col4:
+            st.metric("SL %", f"{float(risk.get('stop_loss_pct', 0.0)):.1%}")
+        with col5:
+            st.metric("TP %", f"{float(risk.get('take_profit_pct', 0.0)):.1%}")
+        rationale = risk.get("rationale")
+        if rationale:
+            st.write(rationale)
+        flags = risk.get("risk_flags", [])
+        if flags:
+            st.warning("Risk flags: " + "; ".join(flags))
+
+    def _render_multi_agent_usage(self, usage: dict) -> None:
+        """Render usage details for llm mode and a clear fast-mode message."""
+        if not usage:
+            return
+        st.write("**Usage**")
+        if int(usage.get("calls", 0)) == 0:
+            st.info("Fast mode completed without LLM calls.")
+            return
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("LLM Calls", int(usage.get("calls", 0)))
+        with col2:
+            st.metric("Tokens", int(usage.get("total_tokens", 0)))
+        with col3:
+            cost = usage.get("estimated_cost_usd")
+            st.metric("Estimated Cost", "N/A" if cost is None else f"${float(cost):.4f}")
+        with col4:
+            st.metric("Latency", f"{float(usage.get('latency_ms', 0.0)):.1f} ms")
+
+    def _render_multi_agent_reports(self, reports: list[dict]) -> None:
+        """Render analyst report summaries and details."""
+        if not reports:
+            return
+        st.write("**Agent Reports**")
+        summary_rows = [
+            {
+                "Agent": report.get("agent_name", "Unknown"),
+                "Action": report.get("action", "HOLD"),
+                "Confidence": f"{float(report.get('confidence', 0.0)):.2f}",
+                "Summary": report.get("summary") or report.get("thesis", ""),
+            }
+            for report in reports
+        ]
+        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+        for report in reports:
+            title = (
+                f"{report.get('agent_name', 'Agent')}: "
+                f"{report.get('action', 'HOLD')} "
+                f"({float(report.get('confidence', 0.0)):.2f})"
+            )
+            with st.expander(title):
+                st.write(report.get("thesis") or report.get("summary") or "No thesis provided.")
+                for point in report.get("key_points", []):
+                    st.write(f"- {point}")
+                flags = report.get("risk_flags", [])
+                if flags:
+                    st.write("Risk Flags: " + "; ".join(flags))
+                metrics = report.get("metrics", {})
+                if metrics:
+                    st.json(metrics)
+
+    def _render_multi_agent_debate_positions(
+        self,
+        debate_positions: list[dict],
+    ) -> None:
+        """Render bull/bear debate positions when available."""
+        if not debate_positions:
+            return
+        st.write("**Debate Positions**")
+        for position in debate_positions:
+            title = (
+                f"{position.get('side', 'side').upper()} "
+                f"({float(position.get('confidence', 0.0)):.2f})"
+            )
+            with st.expander(title):
+                st.write(position.get("thesis", "No thesis provided."))
+                for point in position.get("key_points", []):
+                    st.write(f"- {point}")
+                rebuttal = position.get("rebuttal")
+                if rebuttal:
+                    st.caption(f"Rebuttal: {rebuttal}")
+
     def render_market_stream_extended(self):
         """Extended market stream with WebSocket support."""
         st.subheader("Real-Time Market Stream")
@@ -397,9 +681,18 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
 
             col_a, col_b = st.columns(2)
             with col_a:
-                if st.button("Start Stream", disabled=st.session_state.stream_running):
-                    if symbols and len(symbols) <= 30:
-                        self._start_stream(symbols, stream_type, raw_output, asset_type, crypto_loc)
+                if (
+                    st.button("Start Stream", disabled=st.session_state.stream_running)
+                    and symbols
+                    and len(symbols) <= 30
+                ):
+                    self._start_stream(
+                        symbols,
+                        stream_type,
+                        raw_output,
+                        asset_type,
+                        crypto_loc,
+                    )
             with col_b:
                 if st.button("Stop Stream", disabled=not st.session_state.stream_running):
                     self._stop_stream()
@@ -549,30 +842,36 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
         col1, col2 = st.columns([1, 2])
         with col1:
             from src.ui.dashboard_utils import get_default_symbols
-            default_symbols = get_default_symbols()
-            default_symbols_text = '\n'.join(default_symbols) if default_symbols else "AAPL\nMSFT\nGOOGL"
+            asset_type = st.selectbox(
+                "Asset Type",
+                ["stock", "crypto"],
+                key="backtest_asset_type",
+            )
+            default_symbols = get_default_symbols(asset_type)
+            fallback = self._default_symbols_for_asset(asset_type)
+            default_symbols_text = "\n".join(default_symbols or fallback)
             symbols = st.text_area("Symbols (one per line)", default_symbols_text).strip().split('\n')
             symbols = [s.strip().upper() for s in symbols if s.strip()]
             days_back = st.slider("Backtest Period (days)", 30, 365, 90, key="backtest_period")
             initial_cash = st.number_input("Initial Cash", value=100000, step=10000, key="backtest_initial_cash")
-            display_strategies = []
-            if 'strategy_registry' in st.session_state:
-                strategy_names = st.session_state.strategy_registry.list_strategies(dashboard_only=True)
-                for name in strategy_names:
-                    display_strategies.append(name.replace('_', ' ').title())
-            if not display_strategies:
-                display_strategies = ["Momentum", "Value", "Trend Following"]
-            strategy_display = st.selectbox("Strategy", display_strategies, key="backtest_strategy")
+            strategy_names = self._get_backtest_strategies(asset_type)
+            strategy_name = st.selectbox(
+                "Strategy",
+                strategy_names,
+                format_func=self._format_strategy_name,
+                key="backtest_strategy",
+            )
             if st.button("Run Backtest"):
                 st.session_state.run_backtest = True
                 st.session_state.backtest_params = {
                     'symbols': symbols, 'days_back': days_back,
-                    'initial_cash': initial_cash, 'strategy_type': strategy_display
+                    'initial_cash': initial_cash, 'strategy_type': strategy_name,
                 }
         with col2:
             if hasattr(st.session_state, 'run_backtest') and st.session_state.run_backtest:
                 params = st.session_state.backtest_params
-                with st.spinner(f"Running {params['strategy_type']} strategy backtest..."):
+                label = self._format_strategy_name(params['strategy_type'])
+                with st.spinner(f"Running {label} strategy backtest..."):
                     results, error = self.run_backtest(
                         params['symbols'], params['days_back'], params['initial_cash'], params['strategy_type']
                     )
@@ -587,30 +886,43 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
         col1, col2 = st.columns([1, 2])
         with col1:
             from src.ui.dashboard_utils import get_default_symbols
-            default_symbols = get_default_symbols()
-            symbol = st.selectbox("Select Symbol", options=default_symbols + ["AAPL", "MSFT", "GOOGL", "TSLA"]
-                                  if default_symbols else ["AAPL", "MSFT", "GOOGL", "TSLA"], key="comp_symbol")
-            available_strategies = []
-            if 'strategy_registry' in st.session_state:
-                strategy_names = st.session_state.strategy_registry.list_strategies(dashboard_only=True)
-                for name in strategy_names:
-                    available_strategies.append(name.replace('_', ' ').title())
-            if not available_strategies:
-                available_strategies = ["Momentum", "Value", "Trend Following"]
-            if 'comparison_strategies' not in st.session_state:
+            asset_type = st.selectbox(
+                "Asset Type",
+                ["stock", "crypto"],
+                key="comparison_asset_type_extended",
+            )
+            default_symbols = get_default_symbols(asset_type)
+            symbol = st.selectbox(
+                "Select Symbol",
+                options=default_symbols or self._default_symbols_for_asset(asset_type),
+                key="comp_symbol",
+            )
+            available_strategies = self._get_backtest_strategies(asset_type)
+            if (
+                'comparison_asset_type' not in st.session_state
+                or st.session_state.comparison_asset_type != asset_type
+            ):
+                st.session_state.comparison_asset_type = asset_type
                 st.session_state.comparison_strategies = available_strategies[:3]
             st.write("**Selected Strategies**")
             for strategy in st.session_state.comparison_strategies:
                 col_a, col_b = st.columns([3, 1])
                 with col_a:
-                    st.write(f"- {strategy}")
+                    st.write(f"- {self._format_strategy_name(strategy)}")
                 with col_b:
                     if st.button("X", key=f"remove_{strategy}"):
                         st.session_state.comparison_strategies.remove(strategy)
                         st.rerun()
             remaining = [s for s in available_strategies if s not in st.session_state.comparison_strategies]
             if remaining:
-                add_strategy = st.selectbox("Add Strategy", [""] + remaining, key="add_strat")
+                add_strategy = st.selectbox(
+                    "Add Strategy",
+                    [""] + remaining,
+                    format_func=lambda value: (
+                        "" if not value else self._format_strategy_name(value)
+                    ),
+                    key="add_strat",
+                )
                 if st.button("Add Strategy") and add_strategy:
                     st.session_state.comparison_strategies.append(add_strategy)
                     st.rerun()
@@ -637,7 +949,7 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
                         )
                         if results:
                             comparison_results.append({
-                                'Strategy': strategy_name,
+                                'Strategy': self._format_strategy_name(strategy_name),
                                 'Total Return': f"{results.get('total_return_percentage', 0):.2f}%",
                                 'Sharpe Ratio': f"{results.get('sharpe_ratio', 0):.2f}",
                                 'Max Drawdown': f"{results.get('max_drawdown_percentage', 0):.2f}%",
@@ -646,7 +958,8 @@ class Dashboard(MarketViewsMixin, AccountViewsMixin, TradingViewsMixin, Analysis
                             })
                         else:
                             comparison_results.append({
-                                'Strategy': strategy_name, 'Total Return': 'Error',
+                                'Strategy': self._format_strategy_name(strategy_name),
+                                'Total Return': 'Error',
                                 'Sharpe Ratio': 'N/A', 'Max Drawdown': 'N/A',
                                 'Win Rate': 'N/A', 'Total Trades': 'N/A',
                             })

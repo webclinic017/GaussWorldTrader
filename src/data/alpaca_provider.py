@@ -1,7 +1,9 @@
-from typing import List, Dict, Any, Optional, Union
-import pandas as pd
 from datetime import datetime, timedelta
 import logging
+import re
+from typing import List, Dict, Any, Optional, Union
+
+import pandas as pd
 from src.settings import get_alpaca_base_url, get_config, has_alpaca_credentials
 from src.utils.timezone_utils import EASTERN, now_et
 
@@ -299,7 +301,7 @@ class AlpacaDataProvider:
         feed = "opra" if self.is_pro_tier else "indicative"
 
         request = OptionChainRequest(
-            underlying_symbols=underlying_symbol,
+            underlying_symbol=underlying_symbol,
             feed=feed
         )
 
@@ -478,24 +480,59 @@ class AlpacaDataProvider:
     def _process_crypto_bars(self, bars_response, symbol: str) -> pd.DataFrame:
         """Process crypto bars response into DataFrame"""
         return self._process_bars(bars_response, symbol, 'crypto')
+
+    @staticmethod
+    def _parse_option_symbol(symbol: str) -> Optional[Dict[str, Any]]:
+        """Parse OCC option symbol into underlying, expiry, type, and strike."""
+        match = re.fullmatch(r"([A-Z]{1,6})(\d{6})([CP])(\d{8})", symbol.strip().upper())
+        if not match:
+            return None
+
+        underlying, date_str, option_type, strike_str = match.groups()
+        try:
+            expiration = datetime.strptime(date_str, "%y%m%d").date()
+        except ValueError:
+            return None
+
+        return {
+            "underlying_symbol": underlying,
+            "expiration_date": expiration,
+            "option_type": option_type,
+            "strike_price": int(strike_str) / 1000,
+        }
     
     def _process_options_chain(self, chain_response, underlying_symbol: str) -> pd.DataFrame:
         """Process options chain response into DataFrame"""
         data = []
-        
-        for option_data in chain_response:
+
+        for symbol, snapshot in chain_response.items():
+            parsed = self._parse_option_symbol(symbol)
+            if parsed is None:
+                continue
+
+            latest_quote = getattr(snapshot, "latest_quote", None) or {}
+            latest_trade = getattr(snapshot, "latest_trade", None)
+            greeks = getattr(snapshot, "greeks", None) or {}
+
             data.append({
-                'symbol': option_data.symbol,
-                'underlying_symbol': underlying_symbol,
-                'option_type': 'C' if 'C' in option_data.symbol else 'P',
-                'strike_price': getattr(option_data, 'strike_price', 0),
-                'expiration_date': getattr(option_data, 'expiration_date', None),
-                'bid_price': getattr(option_data, 'bid_price', 0),
-                'ask_price': getattr(option_data, 'ask_price', 0),
-                'last_price': getattr(option_data, 'last_price', 0),
-                'volume': getattr(option_data, 'volume', 0)
+                'symbol': symbol,
+                'underlying_symbol': parsed['underlying_symbol'] or underlying_symbol,
+                'option_type': parsed['option_type'],
+                'strike_price': parsed['strike_price'],
+                'expiration_date': parsed['expiration_date'],
+                'bid_price': getattr(latest_quote, 'bid_price', None),
+                'ask_price': getattr(latest_quote, 'ask_price', None),
+                'last_price': getattr(latest_trade, 'price', None),
+                'volume': None,
+                'open_interest': None,
+                'delta': getattr(greeks, 'delta', None),
+                'gamma': getattr(greeks, 'gamma', None),
+                'theta': getattr(greeks, 'theta', None),
+                'vega': getattr(greeks, 'vega', None),
+                'rho': getattr(greeks, 'rho', None),
+                'implied_volatility': getattr(snapshot, 'implied_volatility', None),
             })
-        
+
         return pd.DataFrame(data)
     
     def get_data_feed_info(self) -> Dict[str, Any]:

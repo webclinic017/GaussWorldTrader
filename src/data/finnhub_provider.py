@@ -125,7 +125,14 @@ class FinnhubProvider:
     ) -> List[Dict[str, Any]]:
         """Get insider transactions"""
         payload = self.client.stock_insider_transactions(symbol)
-        return self._unwrap(payload, f"Fetch insider transactions for {symbol}")
+        unwrapped = self._unwrap(payload, f"Fetch insider transactions for {symbol}")
+        if isinstance(unwrapped, list):
+            return unwrapped
+        if isinstance(unwrapped, dict):
+            data = unwrapped.get("data")
+            if isinstance(data, list):
+                return data
+        return []
 
     def get_insider_sentiment(
         self, symbol: str,

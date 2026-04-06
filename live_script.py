@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -13,6 +12,14 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.text import Text
 
+from src.settings import get_alpaca_base_url
+from src.strategy.registry import get_strategy_registry
+from src.trade.engine import (
+    ExecutionContext,
+    ExecutionEngine,
+    TradingStockEngine,
+)
+from src.trade.live import run_live_engines
 from src.trade.live.live_trading_crypto import (
     create_crypto_engines,
     get_default_crypto_symbols,
@@ -25,16 +32,7 @@ from src.trade.live.live_trading_stock import (
     create_stock_engines,
     get_default_stock_symbols,
 )
-from src.strategy.registry import get_strategy_registry
-from src.trade.live import run_live_engines
 from src.watchlist import WatchlistManager
-from src.settings import get_alpaca_base_url
-from src.trade.engine import (
-    ExecutionContext,
-    ExecutionEngine,
-    TradingStockEngine,
-)
-
 
 console = Console()
 
@@ -56,9 +54,10 @@ DEFAULT_STRATEGIES = {"stock": "momentum", "crypto": "crypto_momentum", "option"
 @dataclass
 class TradingConfig:
     """Trading configuration for a session."""
-    asset_types: List[str] = field(default_factory=list)
-    symbols: Dict[str, List[str]] = field(default_factory=dict)
-    strategies: Dict[str, str] = field(default_factory=dict)
+    asset_types: list[str] = field(default_factory=list)
+    symbols: dict[str, list[str]] = field(default_factory=dict)
+    strategies: dict[str, str] = field(default_factory=dict)
+    strategy_params: dict[str, dict[str, object]] = field(default_factory=dict)
     timeframe: str = "1Hour"
     lookback_days: int = 30
     risk_pct: float = 0.05
@@ -71,10 +70,10 @@ class TradingConfig:
     extended_hours: bool = False
     allow_sell_to_open: bool = False
     order_type: str = "auto"
-    requested_fractional: Optional[bool] = None
-    requested_sell_to_open: Optional[bool] = None
-    supports_fractional: Optional[bool] = None
-    supports_sell_to_open: Optional[bool] = None
+    requested_fractional: bool | None = None
+    requested_sell_to_open: bool | None = None
+    supports_fractional: bool | None = None
+    supports_sell_to_open: bool | None = None
     # Crypto-specific
     crypto_loc: str = "us"
     # Option-specific
@@ -106,7 +105,7 @@ def show_watchlist_summary() -> None:
     console.print()
 
 
-def load_account_context() -> Optional[ExecutionContext]:
+def load_account_context() -> ExecutionContext | None:
     """Load account and configuration capabilities for validation."""
     logging.getLogger("TradingStockEngine").setLevel(logging.WARNING)
     logging.getLogger("src.account.account_manager").setLevel(logging.WARNING)
@@ -155,7 +154,7 @@ def show_account_summary(context: ExecutionContext) -> None:
     console.print()
 
 
-def select_asset_types() -> List[str]:
+def select_asset_types() -> list[str]:
     """Interactive selection of asset types to trade."""
     console.print(Panel("[bold]Asset Type Selection[/bold]", style="blue"))
     console.print("Select which asset types to trade:\n")
@@ -182,7 +181,7 @@ def select_asset_types() -> List[str]:
     return [options[int(choice) - 1][1]]
 
 
-def get_symbols_for_type(asset_type: str) -> List[str]:
+def get_symbols_for_type(asset_type: str) -> list[str]:
     """Get symbols for a specific asset type."""
     if asset_type == "stock":
         return get_default_stock_symbols()
@@ -193,12 +192,12 @@ def get_symbols_for_type(asset_type: str) -> List[str]:
     return []
 
 
-def configure_symbols(asset_types: List[str]) -> Dict[str, List[str]]:
+def configure_symbols(asset_types: list[str]) -> dict[str, list[str]]:
     """Configure symbols for each asset type."""
     console.print()
     console.print(Panel("[bold]Symbol Configuration[/bold]", style="blue"))
 
-    symbols: Dict[str, List[str]] = {}
+    symbols: dict[str, list[str]] = {}
 
     for asset_type in asset_types:
         defaults = get_symbols_for_type(asset_type)
@@ -221,7 +220,7 @@ def configure_symbols(asset_types: List[str]) -> Dict[str, List[str]]:
     return symbols
 
 
-def get_strategies_for_type(asset_type: str) -> List[str]:
+def get_strategies_for_type(asset_type: str) -> list[str]:
     """Get available strategies for a specific asset type."""
     registry = get_strategy_registry()
     return [
@@ -235,12 +234,12 @@ def get_default_strategy(asset_type: str) -> str:
     return DEFAULT_STRATEGIES.get(asset_type, "momentum")
 
 
-def configure_strategies(asset_types: List[str]) -> Dict[str, str]:
+def configure_strategies(asset_types: list[str]) -> dict[str, str]:
     """Configure strategies for each asset type."""
     console.print()
     console.print(Panel("[bold]Strategy Selection[/bold]", style="blue"))
 
-    strategies: Dict[str, str] = {}
+    strategies: dict[str, str] = {}
 
     for asset_type in asset_types:
         available = get_strategies_for_type(asset_type)
@@ -266,7 +265,29 @@ def configure_strategies(asset_types: List[str]) -> Dict[str, str]:
     return strategies
 
 
-def configure_parameters(config: TradingConfig, context: Optional[ExecutionContext]) -> TradingConfig:
+def configure_strategy_options(config: TradingConfig) -> TradingConfig:
+    """Configure strategy-specific options."""
+    stock_strategy = config.strategies.get("stock")
+    if stock_strategy != "multi_agent":
+        return config
+
+    console.print()
+    console.print(Panel("[bold]Multi-Agent Settings[/bold]", style="blue"))
+    console.print("`fast` avoids live LLM calls. `llm` uses the configured LLM provider.")
+
+    stock_params = dict(config.strategy_params.get("stock", {}))
+    default_mode = str(stock_params.get("mode", "fast"))
+    mode = Prompt.ask(
+        "Multi-agent mode",
+        choices=["fast", "llm"],
+        default=default_mode,
+    )
+    stock_params["mode"] = mode
+    config.strategy_params["stock"] = stock_params
+    return config
+
+
+def configure_parameters(config: TradingConfig, context: ExecutionContext | None) -> TradingConfig:
     """Configure trading parameters interactively."""
     if context:
         config.supports_fractional = context.fractional_enabled
@@ -335,7 +356,7 @@ def configure_parameters(config: TradingConfig, context: Optional[ExecutionConte
 
 
 def apply_account_constraints(
-    config: TradingConfig, context: Optional[ExecutionContext]
+    config: TradingConfig, context: ExecutionContext | None
 ) -> TradingConfig:
     """Resolve user config against account capabilities."""
     if not context:
@@ -355,7 +376,7 @@ def apply_account_constraints(
     return config
 
 
-def show_final_config(config: TradingConfig, context: Optional[ExecutionContext]) -> None:
+def show_final_config(config: TradingConfig, _context: ExecutionContext | None) -> None:
     """Display final configuration before starting."""
     console.print()
     console.print(Panel("[bold]Trading Configuration Summary[/bold]", style="green"))
@@ -368,6 +389,9 @@ def show_final_config(config: TradingConfig, context: Optional[ExecutionContext]
         table.add_row(f"{asset_type.upper()} Symbols", ", ".join(symbols))
         strategy = config.strategies.get(asset_type, get_default_strategy(asset_type))
         table.add_row(f"{asset_type.upper()} Strategy", strategy)
+        if strategy == "multi_agent":
+            mode = config.strategy_params.get(asset_type, {}).get("mode", "fast")
+            table.add_row(f"{asset_type.upper()} Multi-Agent Mode", str(mode))
 
     table.add_row("Timeframe", config.timeframe)
     table.add_row("Lookback", f"{config.lookback_days} days")
@@ -389,7 +413,7 @@ def run_trading(config: TradingConfig) -> None:
     console.print(Panel(f"[bold]Starting Trading - {mode}[/bold]", style="cyan"))
     console.print()
 
-    engine_groups: Dict[str, list] = {}
+    engine_groups: dict[str, list] = {}
 
     for asset_type in config.asset_types:
         symbols = config.symbols.get(asset_type, [])
@@ -399,6 +423,7 @@ def run_trading(config: TradingConfig) -> None:
         console.print(f"[cyan]Creating {asset_type.upper()} engines...[/cyan]")
 
         strategy = config.strategies.get(asset_type, get_default_strategy(asset_type))
+        strategy_params = config.strategy_params.get(asset_type)
 
         if asset_type == "stock":
             engines = create_stock_engines(
@@ -413,6 +438,7 @@ def run_trading(config: TradingConfig) -> None:
                 fractional=config.fractional,
                 extended_hours=config.extended_hours,
                 strategy=strategy,
+                strategy_params=strategy_params,
                 allow_sell_to_open=config.allow_sell_to_open,
                 order_type=config.order_type,
             )
@@ -500,7 +526,7 @@ def run_trading(config: TradingConfig) -> None:
                 break
 
 
-def quick_start() -> Optional[TradingConfig]:
+def quick_start() -> TradingConfig | None:
     """Quick start with all defaults from watchlist."""
     console.print()
     console.print(Panel("[bold]Quick Start[/bold]", style="green"))
@@ -520,6 +546,7 @@ def quick_start() -> Optional[TradingConfig]:
             )
 
     console.print()
+    config = configure_strategy_options(config)
     config.execute = Confirm.ask(
         "Execute live trades? (No = dry run)",
         default=False,
@@ -563,6 +590,7 @@ def main() -> None:
             config.asset_types = select_asset_types()
             config.symbols = configure_symbols(config.asset_types)
             config.strategies = configure_strategies(config.asset_types)
+            config = configure_strategy_options(config)
             config = configure_parameters(config, account_context)
 
         if config:
