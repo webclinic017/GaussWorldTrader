@@ -369,6 +369,23 @@ sentiment, risk, and decision agents.
 
 ---
 
+## 📝 Changelog
+
+### v1.2.0-beta.1 — 2026-04-06
+
+- Added a dedicated multi-agent dashboard panel with final decision, risk, reports, debate,
+  and usage details.
+- Added `fast` versus `llm` multi-agent mode selection to the live stock CLI.
+- Switched stock and crypto backtests to `vectorbt` while keeping the legacy options path.
+- Added `mean_reversion`, `macro_factor`, and `btc_volatility_breakout` strategy support to
+  the current CLI and dashboard flows.
+- Fixed multi-agent backtest correctness around evaluation dates, ATR warmup, and async loop
+  reuse.
+- Fixed live trading issues around Alpaca options chains and stock fractional order sizing.
+- Hardened multi-agent fundamental analysis against Finnhub entitlement-limited datasets.
+
+---
+
 ## 📚 Documentation
 
 - [Wheel Options Strategy](docs/wheel_strategy.md) — Detailed guide for the wheel options strategy
